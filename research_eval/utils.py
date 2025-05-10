@@ -4,7 +4,7 @@ from tqdm import tqdm
 import time
 from sklearn.metrics import f1_score
 import numpy as np
-import math
+
 
 def get_optimizer(params, optimizer_name: str, lr: float, weight_decay: float = 0.01):
     if optimizer_name.lower() == "adamw":

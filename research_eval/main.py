@@ -7,9 +7,11 @@ import pandas as pd
 import os
 import logging
 
-from models import DenseTransformerClassifier, MoETransformerClassifier, GoEClassifier
-from datasets import get_synthetic_data_loaders, get_real_world_data_loaders, SYNTHETIC_DATASETS
-from utils import train_epoch, evaluate_model, get_optimizer, get_scheduler
+from research_eval.datasets.providers import get_synthetic_data_loaders, get_real_world_data_loaders, SYNTHETIC_DATASETS
+from research_eval.models.dense_transformer import DenseTransformerClassifier
+from research_eval.models.goe_transformer import GoEClassifier
+from research_eval.models.moe_transformer import MoETransformerClassifier
+from research_eval.utils import train_epoch, evaluate_model, get_optimizer, get_scheduler
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 REAL_WORLD_DATASETS = ["ag_news", "imdb", "sst2", "trec"]
@@ -124,11 +126,11 @@ def objective(trial: optuna.trial.Trial, dataset_type: str, dataset_name: str, e
         )
         for k, v in model_metrics.items(): logging.info(f"Trial {trial.number} Epoch {epoch+1} - {k}: {v:.3f}")
 
-        trial.report(val_f1, epoch) # Report F1 for pruning
         if val_f1 > best_val_f1: best_val_f1 = val_f1
-        
-        if trial.should_prune():
-            raise optuna.exceptions.TrialPruned()
+
+        #trial.report(val_f1, epoch) # Report F1 for pruning
+        #if trial.should_prune():
+        #    raise optuna.exceptions.TrialPruned()
     
     trial_duration = time.time() - trial_train_start_time
     trial_results['training_time_seconds'] = trial_duration
