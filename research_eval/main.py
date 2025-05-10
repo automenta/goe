@@ -214,21 +214,27 @@ if __name__ == "__main__":
         logging.info(f"    Values (F1, ParamCount, Latency): {trial.values}")
         logging.info(f"    Params: {trial.params}")
         if "full_results" in trial.user_attrs:
-             logging.info(f"    Full Results: {trial.user_attrs['full_results']}")
+             logging.info(f"    Full Results (sample): {{'final_val_f1': {trial.user_attrs['full_results'].get('final_val_f1', 'N/A')}, ...}}")
 
-    # Save study results to a CSV
+
     results_df = []
     for trial in study.trials:
         if trial.state == optuna.trial.TrialState.COMPLETE:
             row = {"trial_number": trial.number}
-            row.update(trial.params)
+            row.update(trial.params) # Hyperparameters suggested by Optuna
             row["value_f1"] = trial.values[0] if trial.values else None
             row["value_param_count"] = trial.values[1] if trial.values and len(trial.values) > 1 else None
             row["value_latency_ms"] = trial.values[2] if trial.values and len(trial.values) > 2 else None
+
+            # Add all other logged metrics from full_results, prefixing them to avoid clashes
             if "full_results" in trial.user_attrs:
-                row.update(trial.user_attrs["full_results"]) # Add all other logged metrics
+                for k, v_attr in trial.user_attrs["full_results"].items():
+                    # Avoid duplicating keys already present (like param_count from trial.params)
+                    # or values already captured (like value_f1)
+                    if not k.startswith("param_") and k not in ["final_val_f1", "param_count", "inference_latency_ms_batch"]:
+                         row[f"metric_{k}"] = v_attr
             results_df.append(row)
-    
+
     if results_df:
         df = pd.DataFrame(results_df)
         results_filename = f"{args.study_name}_{args.dataset_type}_{args.dataset_name}_results.csv"
