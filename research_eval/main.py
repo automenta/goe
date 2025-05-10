@@ -84,7 +84,7 @@ def objective(trial: optuna.trial.Trial, dataset_type: str, dataset_name: str, e
     elif model_type == "goe":
         max_path_len = trial.suggest_int("goe_max_path_len", 1, 3)
         num_total_experts = trial.suggest_int("goe_num_total_experts_pool", 2, 4)
-        router_hidden_dim = trial.suggest_categorical("goe_router_hidden_dim", [embed_dim // 2, embed_dim])
+        router_hidden_dim = trial.suggest_int("goe_router_hidden_dim", embed_dim // 2, embed_dim)
         gumbel_tau = trial.suggest_float("goe_gumbel_tau", 0.5, 1.5, step=0.25)
         model = GoEClassifier(vocab_size, embed_dim, num_heads, dim_feedforward, num_classes,
                               num_total_experts, max_path_len, router_hidden_dim, 
@@ -140,11 +140,10 @@ def objective(trial: optuna.trial.Trial, dataset_type: str, dataset_name: str, e
             logging.info(f"Trial {trial.number} Epoch {epoch+1} - {k}: {log_value:.3f}")
 
 
-        trial.report(val_f1, epoch)
         if val_f1 > best_val_f1: best_val_f1 = val_f1
-
-        if trial.should_prune():
-            raise optuna.exceptions.TrialPruned()
+        #trial.report(val_f1, epoch)
+        #if trial.should_prune():
+        #    raise optuna.exceptions.TrialPruned()
 
     trial_duration = time.time() - trial_train_start_time
     trial_results['training_time_seconds'] = trial_duration
