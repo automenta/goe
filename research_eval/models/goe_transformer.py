@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from .base_model import EvaluableModel
-from ..utils import gumbel_softmax, calculate_entropy # Relative imports
+from ..utils import gumbel_softmax, calculate_entropy, calculate_cv # Relative imports
 
 class ExpertModule(nn.Module):
     def __init__(self, embed_dim, num_heads, dim_feedforward, dropout):
