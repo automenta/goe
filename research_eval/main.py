@@ -49,17 +49,27 @@ def objective(trial: optuna.trial.Trial, dataset_type: str, dataset_name: str, e
     model_type = trial.suggest_categorical("model_type", ["dense", "moe", "goe"])
 
     embed_dim = trial.suggest_categorical("embed_dim", [32, 64, 128])
-    possible_num_heads = [h for h in [2, 4, 8] if embed_dim % h == 0 and h <= embed_dim] # num_heads <= embed_dim
-    if not possible_num_heads: possible_num_heads = [1]
-    num_heads = trial.suggest_categorical("num_heads", possible_num_heads)
-    
-    dim_feedforward_options = [embed_dim * 2, embed_dim * 4]
-    if embed_dim * 1 in dim_feedforward_options: dim_feedforward_options.remove(embed_dim*1) # ensure >0
-    if not dim_feedforward_options: dim_feedforward_options = [embed_dim * 2] # fallback
-    dim_feedforward = trial.suggest_categorical("dim_feedforward", dim_feedforward_options)
+
+    # Suggest num_heads from a fixed list of common values.
+    # Then, validate against the chosen embed_dim.
+    _fixed_num_heads_options = [1, 2, 4, 8]
+    num_heads = trial.suggest_categorical("num_heads", _fixed_num_heads_options)
+
+    if embed_dim % num_heads != 0:
+        raise optuna.exceptions.TrialPruned(
+            f"embed_dim ({embed_dim}) is not divisible by num_heads ({num_heads}). Pruning trial."
+        )
+    if num_heads > embed_dim and embed_dim > 0: # embed_dim > 0 to avoid issues if it could be 0
+         raise optuna.exceptions.TrialPruned(
+            f"num_heads ({num_heads}) cannot be greater than embed_dim ({embed_dim}). Pruning trial."
+        )
+
+    # Suggest a factor, then compute dim_feedforward. This keeps choices static.
+    dim_feedforward_factor = trial.suggest_categorical("dim_feedforward_factor", [2, 4]) # Common factors
+    dim_feedforward = embed_dim * dim_feedforward_factor
 
     dropout = trial.suggest_float("dropout", 0.1, 0.3, step=0.05)
-    
+
     model = None
     if model_type == "dense":
         num_layers = trial.suggest_int("dt_num_layers", 1, 3)
@@ -124,29 +134,34 @@ def objective(trial: optuna.trial.Trial, dataset_type: str, dataset_name: str, e
             f"Val Loss: {val_loss:.3f}, Val Acc: {val_acc:.3f}, Val F1: {val_f1:.3f} | "
             f"Val Latency/batch: {val_latency_batch*1000:.2f}ms | Epoch Time: {epoch_duration:.2f}s"
         )
-        for k, v in model_metrics.items(): logging.info(f"Trial {trial.number} Epoch {epoch+1} - {k}: {v:.3f}")
+        for k, v_metric in model_metrics.items(): # Renamed v to v_metric to avoid conflict
+            # Ensure v_metric is a scalar before formatting
+            log_value = v_metric.item() if isinstance(v_metric, torch.Tensor) else v_metric
+            logging.info(f"Trial {trial.number} Epoch {epoch+1} - {k}: {log_value:.3f}")
 
+
+        trial.report(val_f1, epoch)
         if val_f1 > best_val_f1: best_val_f1 = val_f1
 
-        #trial.report(val_f1, epoch) # Report F1 for pruning
-        #if trial.should_prune():
-        #    raise optuna.exceptions.TrialPruned()
-    
+        if trial.should_prune():
+            raise optuna.exceptions.TrialPruned()
+
     trial_duration = time.time() - trial_train_start_time
     trial_results['training_time_seconds'] = trial_duration
     trial_results['best_val_f1'] = best_val_f1
-    
-    # Final evaluation for latency and metrics (can be slightly different from last epoch's val)
-    _, _, final_f1, final_latency, final_model_metrics = evaluate_model(model, val_loader, criterion, DEVICE, return_latency=True)
-    trial_results['final_val_f1'] = final_f1 # This is the primary metric for Optuna
-    trial_results['inference_latency_ms_batch'] = final_latency * 1000
-    trial_results.update(final_model_metrics)
 
-    # Log all trial hyperparams and results
+    _, _, final_f1, final_latency, final_model_metrics = evaluate_model(model, val_loader, criterion, DEVICE, return_latency=True)
+    trial_results['final_val_f1'] = final_f1
+    trial_results['inference_latency_ms_batch'] = final_latency * 1000
+
+    # Ensure model metrics are scalar before adding to results
+    for k, v_metric in final_model_metrics.items():
+        trial_results[k] = v_metric.item() if isinstance(v_metric, torch.Tensor) else v_metric
+
+
     for key, value in trial.params.items(): trial_results[f"param_{key}"] = value
     trial.set_user_attr("full_results", trial_results)
 
-    # Objectives: Maximize F1, Minimize ParamCount, Minimize InferenceLatency
     return trial_results['final_val_f1'], float(param_count), trial_results['inference_latency_ms_batch']
 
 
@@ -157,7 +172,7 @@ if __name__ == "__main__":
     parser.add_argument("--dataset_type", type=str, default="synthetic", choices=["synthetic", "real_world"], help="Dataset type")
     parser.add_argument("--dataset_name", type=str, default="parity", help=f"Specific dataset name. Synthetic: {list(SYNTHETIC_DATASETS.keys())}. Real-world: {REAL_WORLD_DATASETS}")
     parser.add_argument("--n_trials", type=int, default=30, help="Number of Optuna trials")
-    parser.add_argument("--epochs", type=int, default=3, help="Number of training epochs per trial") # Keep low for speed
+    parser.add_argument("--epochs", type=int, default=3, help="Number of training epochs per trial")
     parser.add_argument("--batch_size", type=int, default=16, help="Batch size")
     args = parser.parse_args()
 
