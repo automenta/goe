@@ -46,6 +46,13 @@ class PositionalEncoding(nn.Module):
              # Let's assume max_len is sufficient for now.
              pe_to_use = self.pe[:, :seq_len] # This is correct if seq_len <= max_len
 
+        if seq_len > self.pe.size(1):
+             # Warn if sequence length exceeds max_len, PE will be truncated
+             warnings.warn(f"Input sequence length ({seq_len}) exceeds PositionalEncoding max_len ({self.pe.size(1)}). PE will be truncated.")
+             pe_to_use = self.pe[:, :self.pe.size(1)].to(device)
+        else:
+             pe_to_use = self.pe[:, :seq_len].to(device)
+
         return self.dropout(x + pe_to_use)
 
 
@@ -56,9 +63,10 @@ class GatedAttention(nn.Module):
         self.gate = nn.Linear(embed_dim * 2, embed_dim)
         self.norm = nn.LayerNorm(embed_dim)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, key_padding_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         # x: (batch_size, seq_len, embed_dim)
-        attn_out, _ = self.attn(x, x, x) # attn_out: (batch_size, seq_len, embed_dim)
+        # key_padding_mask: (batch_size, seq_len) - True for padding
+        attn_out, _ = self.attn(x, x, x, key_padding_mask=key_padding_mask) # Pass mask to attention
         # Concatenate x and attn_out along the last dimension
         gated_attn = torch.sigmoid(self.gate(torch.cat([x, attn_out], dim=-1))) * attn_out
         return self.norm(x + gated_attn)
@@ -80,14 +88,15 @@ class Expert(nn.Module):
         # Gate linear layer takes mean of processed output, outputs a scalar gate value per sequence
         self.gate_linear = nn.Linear(embed_dim, 1)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, src_key_padding_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         # x: (batch_size, seq_len, embed_dim)
+        # src_key_padding_mask: (batch_size, seq_len) - True for padding
         x_input = x  # Save original input for skip connection in adaptive gate
 
         # Core expert processing
         for mod in self.layers:
-            # Apply attention with residual and norm
-            x = x + mod['dropout'](mod['attn'](mod['norm1'](x)))
+            # Apply attention with residual and norm, passing the mask
+            x = x + mod['dropout'](mod['attn'](mod['norm1'](x), key_padding_mask=src_key_padding_mask))
             # Apply FFN with residual and norm
             x = x + mod['dropout'](mod['ffn'](mod['norm2'](x)))
 
@@ -179,7 +188,8 @@ class GoEOriginalClassifier(EvaluableModel):
                  dropout: float = 0.1, padding_idx: int = 0, gumbel_tau: float = 1.0,
                  path_penalty_coef: float = 0.005, # Path length penalty as a loss term
                  diversity_loss_coef: float = 0.02, # Diversity loss coefficient
-                 contrastive_loss_coef: float = 0.05 # Contrastive loss coefficient
+                 contrastive_loss_coef: float = 0.05, # Contrastive loss coefficient
+                 max_visits_per_expert: int = 2 # Added max_visits_per_expert HP
                  ):
         super().__init__()
         self.model_name = "GoEOriginalClassifier"
@@ -187,6 +197,7 @@ class GoEOriginalClassifier(EvaluableModel):
         self.vocab_size, self.embed_dim, self.num_classes = vocab_size, embed_dim, num_classes
         self.num_total_experts = num_total_experts
         self.max_path_len = max_path_len
+        self.max_visits_per_expert = max_visits_per_expert # Store new HP
         self.gumbel_tau = gumbel_tau
         self.path_penalty_coef = path_penalty_coef # Renamed for clarity as it's a loss term
         self.diversity_coef = diversity_loss_coef
@@ -280,21 +291,11 @@ class GoEOriginalClassifier(EvaluableModel):
         # Embedding and Positional Encoding
         # Scale embedding by sqrt(embed_dim) as in original Transformer/goe_original
         x = self.dropout_embed(self.embedding(input_ids) * math.sqrt(self.embed_dim))
-        # Ensure pos_encoder max_len is sufficient or handle slicing
-        if seq_len > self.pos_encoder.pe.size(1):
-             # Warn or handle sequences longer than PE max_len
-             # For now, PE will be broadcasted up to its max_len, rest of sequence gets no PE
-             # This is a limitation. A proper fix would be to pad PE or use a different PE method.
-             # Let's just use the available PE slice.
-             x = self.input_norm(x + self.pos_encoder.pe[:, :seq_len].to(device)) # Apply PE and input norm
-        else:
-             x = self.input_norm(self.pos_encoder(x)) # Apply PE and input norm
+        # Apply PE and input norm
+        x = self.input_norm(self.pos_encoder(x))
 
 
         current_data_repr = x.clone() # Representation that gets updated through the path
-
-        # Router state (GRUCell hidden state)
-        h_router = self.router.init_state(batch_size, device)
 
         # Track state for auxiliary losses and metrics
         router_probs_list: List[torch.Tensor] = [] # Collect router probabilities per step
@@ -313,7 +314,6 @@ class GoEOriginalClassifier(EvaluableModel):
 
             # Select active samples' data and router state
             current_active_repr = current_data_repr[active_indices] # (N_active, seq_len, embed_dim)
-            h_router_active = h_router[active_indices] # (N_active, router_hidden_dim)
             visits_active = visits[active_indices] # (N_active, num_experts)
             src_key_padding_mask_active = src_key_padding_mask[active_indices] # (N_active, seq_len)
 
@@ -322,10 +322,10 @@ class GoEOriginalClassifier(EvaluableModel):
             max_summary, _ = current_active_repr.max(dim=1) # (N_active, embed_dim)
             summary_for_router = torch.cat((mean_summary, max_summary), dim=-1) # (N_active, embed_dim * 2)
 
-            # Get router logits and update router state for active samples
+            # Get router logits for active samples (Router is stateless)
             # Pass max_visits_per_expert to router forward for masking
-            expert_logits_active, h_router[active_indices] = self.router(
-                summary_for_router, h_router_active, self.max_visits_per_expert
+            expert_logits_active = self.router(
+                summary_for_router, visits_active, self.max_visits_per_expert
             ) # expert_logits_active: (N_active, num_experts + 1)
 
             # Store router probabilities for diversity loss calculation later
@@ -382,7 +382,7 @@ class GoEOriginalClassifier(EvaluableModel):
                         # Get the padding mask for these samples
                         mask_for_expert = src_key_padding_mask[expert_chosen_orig_indices] # (N_expert_subset, seq_len)
 
-                        # Process through the expert
+                        # Process through the expert, passing the mask
                         expert_out = self.experts[exp_idx](data_for_expert, src_key_padding_mask=mask_for_expert) # (N_expert_subset, seq_len, embed_dim)
 
                         # Update representation for continuing samples

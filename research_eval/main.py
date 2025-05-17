@@ -8,6 +8,7 @@ import os
 import logging
 
 from research_eval.datasets.providers import get_synthetic_data_loaders, get_real_world_data_loaders, SYNTHETIC_DATASETS
+from research_eval.datasets.providers import get_synthetic_data_loaders, get_real_world_data_loaders, SYNTHETIC_DATASETS
 from research_eval.models.dense_transformer import DenseTransformerClassifier
 from research_eval.models.goe_transformer import GoEClassifier
 from research_eval.models.moe_transformer import MoETransformerClassifier
@@ -103,6 +104,7 @@ def objective(trial: optuna.trial.Trial, dataset_type: str, dataset_name: str, e
         path_penalty_coef = trial.suggest_float("goe_original_path_penalty_coef", 0.001, 0.05, log=True)
         diversity_loss_coef = trial.suggest_float("goe_original_diversity_loss_coef", 0.001, 0.1, log=True)
         contrastive_loss_coef = trial.suggest_float("goe_original_contrastive_loss_coef", 0.001, 0.1, log=True)
+        max_visits_per_expert = trial.suggest_int("goe_original_max_visits", 1, 3) # Added max_visits_per_expert HP
 
         model = GoEOriginalClassifier(
             vocab_size=vocab_size,
@@ -119,7 +121,8 @@ def objective(trial: optuna.trial.Trial, dataset_type: str, dataset_name: str, e
             gumbel_tau=gumbel_tau,
             path_penalty_coef=path_penalty_coef,
             diversity_loss_coef=diversity_loss_coef,
-            contrastive_loss_coef=contrastive_loss_coef
+            contrastive_loss_coef=contrastive_loss_coef,
+            max_visits_per_expert=max_visits_per_expert # Pass new HP
         ).to(DEVICE)
 
     if model is None: raise ValueError("Model not instantiated")
