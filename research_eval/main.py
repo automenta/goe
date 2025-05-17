@@ -11,10 +11,11 @@ from research_eval.datasets.providers import get_synthetic_data_loaders, get_rea
 from research_eval.models.dense_transformer import DenseTransformerClassifier
 from research_eval.models.goe_transformer import GoEClassifier
 from research_eval.models.moe_transformer import MoETransformerClassifier
+from research_eval.models.goe_original_classifier import GoEOriginalClassifier # Import the new model
 from research_eval.utils import train_epoch, evaluate_model, get_optimizer, get_scheduler
 
-#MODELS = ["dense", "moe", "goe"]
-MODELS = ["dense", "goe"]
+# Add the new model name to the list of available models
+MODELS = ["dense", "moe", "goe", "goe_original"]
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 REAL_WORLD_DATASETS = ["ag_news", "imdb", "sst2", "trec"]
@@ -90,9 +91,37 @@ def objective(trial: optuna.trial.Trial, dataset_type: str, dataset_name: str, e
         router_hidden_dim = trial.suggest_int("goe_router_hidden_dim", embed_dim // 2, embed_dim)
         gumbel_tau = trial.suggest_float("goe_gumbel_tau", 0.5, 1.5, step=0.25)
         model = GoEClassifier(vocab_size, embed_dim, num_heads, dim_feedforward, num_classes,
-                              num_total_experts, max_path_len, router_hidden_dim, 
+                              num_total_experts, max_path_len, router_hidden_dim,
                               dropout, padding_idx, gumbel_tau).to(DEVICE)
-    
+    elif model_type == "goe_original":
+        # Hyperparameters specific to GoEOriginalClassifier
+        num_total_experts = trial.suggest_int("goe_original_num_total_experts", 2, 8)
+        max_path_len = trial.suggest_int("goe_original_max_path_len", 2, num_total_experts)
+        router_hidden_dim = trial.suggest_int("goe_original_router_hidden_dim", embed_dim // 2, embed_dim)
+        expert_layers = trial.suggest_int("goe_original_expert_layers", 1, 4) # Number of layers per expert
+        gumbel_tau = trial.suggest_float("goe_original_gumbel_tau", 0.5, 2.0, step=0.25) # Wider range for tau
+        path_penalty_coef = trial.suggest_float("goe_original_path_penalty_coef", 0.001, 0.05, log=True)
+        diversity_loss_coef = trial.suggest_float("goe_original_diversity_loss_coef", 0.001, 0.1, log=True)
+        contrastive_loss_coef = trial.suggest_float("goe_original_contrastive_loss_coef", 0.001, 0.1, log=True)
+
+        model = GoEOriginalClassifier(
+            vocab_size=vocab_size,
+            embed_dim=embed_dim,
+            num_heads=num_heads, # Reusing num_heads from shared HPs
+            dim_feedforward=dim_feedforward, # Reusing dim_feedforward from shared HPs
+            num_classes=num_classes,
+            num_total_experts=num_total_experts,
+            max_path_len=max_path_len,
+            router_hidden_dim=router_hidden_dim,
+            expert_layers=expert_layers,
+            dropout=dropout, # Reusing dropout from shared HPs
+            padding_idx=padding_idx,
+            gumbel_tau=gumbel_tau,
+            path_penalty_coef=path_penalty_coef,
+            diversity_loss_coef=diversity_loss_coef,
+            contrastive_loss_coef=contrastive_loss_coef
+        ).to(DEVICE)
+
     if model is None: raise ValueError("Model not instantiated")
 
     param_count = model.get_parameter_count()
