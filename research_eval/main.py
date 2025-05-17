@@ -13,10 +13,13 @@ from research_eval.models.goe_transformer import GoEClassifier
 from research_eval.models.moe_transformer import MoETransformerClassifier
 from research_eval.utils import train_epoch, evaluate_model, get_optimizer, get_scheduler
 
+#MODELS = ["dense", "moe", "goe"]
+MODELS = ["dense", "goe"]
+
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 REAL_WORLD_DATASETS = ["ag_news", "imdb", "sst2", "trec"]
-MAX_PARAMS_SYNTHETIC = 3_000_000 # Increased slightly
-MAX_PARAMS_REAL_WORLD = 7_000_000 # Increased slightly
+MAX_PARAMS_SYNTHETIC = 30_000_000
+MAX_PARAMS_REAL_WORLD = MAX_PARAMS_SYNTHETIC
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -46,7 +49,7 @@ def objective(trial: optuna.trial.Trial, dataset_type: str, dataset_name: str, e
     else:
         raise ValueError(f"Unknown dataset type: {dataset_type}")
 
-    model_type = trial.suggest_categorical("model_type", ["dense", "moe", "goe"])
+    model_type = trial.suggest_categorical("model_type", MODELS)
 
     embed_dim = trial.suggest_categorical("embed_dim", [32, 64, 128])
 
@@ -68,7 +71,7 @@ def objective(trial: optuna.trial.Trial, dataset_type: str, dataset_name: str, e
     dim_feedforward_factor = trial.suggest_categorical("dim_feedforward_factor", [2, 4]) # Common factors
     dim_feedforward = embed_dim * dim_feedforward_factor
 
-    dropout = trial.suggest_float("dropout", 0.1, 0.3, step=0.05)
+    dropout = trial.suggest_float("dropout", 0, 0.3, step=0.05)
 
     model = None
     if model_type == "dense":
@@ -82,8 +85,8 @@ def objective(trial: optuna.trial.Trial, dataset_type: str, dataset_name: str, e
         model = MoETransformerClassifier(vocab_size, embed_dim, num_heads, num_layers, num_experts,
                                          dim_feedforward, num_classes, dropout, padding_idx, top_k_experts).to(DEVICE)
     elif model_type == "goe":
-        max_path_len = trial.suggest_int("goe_max_path_len", 1, 3)
-        num_total_experts = trial.suggest_int("goe_num_total_experts_pool", 2, 4)
+        num_total_experts = trial.suggest_int("goe_num_total_experts_pool", 2, 8)
+        max_path_len = trial.suggest_int("goe_max_path_len", 2, num_total_experts)
         router_hidden_dim = trial.suggest_int("goe_router_hidden_dim", embed_dim // 2, embed_dim)
         gumbel_tau = trial.suggest_float("goe_gumbel_tau", 0.5, 1.5, step=0.25)
         model = GoEClassifier(vocab_size, embed_dim, num_heads, dim_feedforward, num_classes,
