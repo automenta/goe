@@ -7,7 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 # Assuming these utilities are available in the framework's utils
-from ..utils import calculate_cv # Need calculate_cv from utils
+from ..utils import calculate_cv, gumbel_softmax, calculate_entropy
 
 # --- Model Components (Adapted from goe_original.py) ---
 
@@ -353,7 +353,7 @@ class GoEOriginalClassifier(EvaluableModel):
             # They select an expert based on expert_sel_active.
             continue_mask_step = ~terminate_mask_step # (N_active)
             continue_indices_in_active = torch.where(continue_mask_step)[0] # Indices within the active_indices tensor
-            continue_orig_indices = active_indices[continue_indices_in_existing] # Original indices that continue
+            continue_orig_indices = active_indices[continue_indices_in_active] # Original indices that continue
 
             if continue_orig_indices.numel() > 0:
                 # Get the one-hot expert selection for continuing samples
