@@ -392,7 +392,7 @@ class GoEOriginalClassifier(EvaluableModel):
                         expert_outputs_collected.append(expert_out)
 
                 active_indices = continue_orig_indices # Update active indices for next step
-             else:
+            else:
                 active_indices = torch.tensor([], dtype=torch.long, device=device)
                 break # All samples terminated
 
