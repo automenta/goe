@@ -1,5 +1,6 @@
 import math
 import collections
+import warnings # Import the warnings module
 from typing import List, Tuple, Dict, Any, Optional
 
 import torch
@@ -46,14 +47,13 @@ class PositionalEncoding(nn.Module):
              # Let's assume max_len is sufficient for now.
              pe_to_use = self.pe[:, :seq_len] # This is correct if seq_len <= max_len
 
-        if seq_len > self.pe.size(1):
-             # Warn if sequence length exceeds max_len, PE will be truncated
-             warnings.warn(f"Input sequence length ({seq_len}) exceeds PositionalEncoding max_len ({self.pe.size(1)}). PE will be truncated.")
-             pe_to_use = self.pe[:, :self.pe.size(1)].to(device)
-        else:
-             pe_to_use = self.pe[:, :seq_len].to(device)
-
-        return self.dropout(x + pe_to_use)
+        # x: (batch_size, seq_len, embed_dim)
+        # pe: (1, max_len, embed_dim)
+        # Add positional encoding to the input tensor.
+        # The PE buffer is already on the correct device because the model is.
+        # Slice PE to match the sequence length of the input tensor x.
+        # If seq_len > max_len, PE will be truncated.
+        return self.dropout(x + self.pe[:, :seq_len])
 
 
 class GatedAttention(nn.Module):
