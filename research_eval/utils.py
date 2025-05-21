@@ -99,11 +99,14 @@ def evaluate_model(model, data_loader, criterion, device, return_latency=False):
     f1 = f1_score(all_labels, all_preds, average='macro', zero_division=0) if num_samples > 0 else 0
     avg_latency = np.mean(latencies) if latencies and return_latency else 0.0
     
-    model_specific_metrics = model.get_model_specific_metrics() if hasattr(model, 'get_model_specific_metrics') else {}
+    # Ensure model_specific_metrics is always a dict, even if the method returns None
+    current_model_specific_metrics = model.get_model_specific_metrics() if hasattr(model, 'get_model_specific_metrics') else {}
+    if current_model_specific_metrics is None:
+        current_model_specific_metrics = {}
 
     if return_latency:
-        return avg_loss, accuracy, f1, avg_latency, model_specific_metrics
-    return avg_loss, accuracy, f1, model_specific_metrics
+        return avg_loss, accuracy, f1, avg_latency, current_model_specific_metrics
+    return avg_loss, accuracy, f1, current_model_specific_metrics
 
 
 def gumbel_softmax(logits: torch.Tensor, tau: float = 1.0, hard: bool = False, eps: float = 1e-10, dim: int = -1) -> torch.Tensor:
