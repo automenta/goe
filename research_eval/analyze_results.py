@@ -4,6 +4,7 @@ import argparse
 import os
 import logging
 import sys
+from matplotlib.figure import Figure # Added for returning Figure objects
 import matplotlib.pyplot as plt
 import seaborn as sns
 import json # For potentially parsing JSON strings if needed
@@ -148,7 +149,7 @@ def generate_summary_table(db_file, dataset_name, model_types=None, metric_to_op
     
     return summary_df_final
 
-def plot_f1_vs_params(db_file, dataset_name, model_types=None, output_dir=".", output_image_name=None):
+def plot_f1_vs_params(db_file, dataset_name, model_types=None, output_dir=None, output_image_name=None): # output_dir default None
     logging.info(f"Generating F1 vs. Params plot for dataset: {dataset_name}")
     if model_types:
         logging.info(f"Filtering for model types: {model_types}")
@@ -177,7 +178,7 @@ def plot_f1_vs_params(db_file, dataset_name, model_types=None, output_dir=".", o
 
     if plot_df.empty or 'final_val_f1' not in plot_df.columns or 'param_count' not in plot_df.columns:
         logging.warning("Not enough data (F1 or param_count missing) to generate F1 vs. Params plot.")
-        return
+        return None # Return None if no data
 
     plot_df['final_val_f1'] = pd.to_numeric(plot_df['final_val_f1'], errors='coerce')
     plot_df['param_count'] = pd.to_numeric(plot_df['param_count'], errors='coerce')
@@ -185,29 +186,36 @@ def plot_f1_vs_params(db_file, dataset_name, model_types=None, output_dir=".", o
 
     if plot_df.empty:
         logging.warning("Data is empty after dropping NaNs for F1 vs. Params plot.")
-        return
+        return None # Return None if no data
 
-    plt.figure(figsize=(12, 7)) # Adjusted size for better legend placement
+    fig = Figure(figsize=(10, 6)) # Use Matplotlib's Figure directly
+    ax = fig.add_subplot(111)
+
     sns.scatterplot(data=plot_df, x='param_count', y='final_val_f1', hue='model_type', 
-                    size='param_count', sizes=(50, 600), alpha=0.7, legend="auto")
-    plt.title(f'F1 Score vs. Parameter Count on {dataset_name}')
-    plt.xlabel('Parameter Count (Log Scale)')
-    plt.ylabel('Final Validation F1 Score')
-    plt.xscale('log') 
-    plt.legend(title='Model Type', bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0.)
-    plt.grid(True, which="both", ls="-", alpha=0.5)
+                    size='param_count', sizes=(50, 600), alpha=0.7, legend="auto", ax=ax)
+    ax.set_title(f'F1 Score vs. Parameter Count on {dataset_name}')
+    ax.set_xlabel('Parameter Count (Log Scale)')
+    ax.set_ylabel('Final Validation F1 Score')
+    ax.set_xscale('log')
+    ax.legend(title='Model Type', bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0.)
+    ax.grid(True, which="both", ls="-", alpha=0.5)
     
-    if not output_image_name:
+    # Default image name if saving
+    if output_dir and not output_image_name:
         output_image_name = f"{dataset_name}_f1_vs_params.png"
-    image_path = os.path.join(output_dir, output_image_name)
+
+    if output_dir and output_image_name:
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        image_path = os.path.join(output_dir, output_image_name)
+        fig.tight_layout(rect=[0, 0, 0.85, 1]) # Apply tight_layout before saving for stand-alone image
+        fig.savefig(image_path)
+        logging.info(f"F1 vs. Params plot saved to {image_path}")
     
-    plt.tight_layout(rect=[0, 0, 0.85, 1]) # Adjust layout to make space for legend
-    plt.savefig(image_path)
-    logging.info(f"F1 vs. Params plot saved to {image_path}")
-    plt.close()
+    return fig # Always return the figure
 
 
-def plot_f1_vs_latency(db_file, dataset_name, model_types=None, output_dir=".", output_image_name=None):
+def plot_f1_vs_latency(db_file, dataset_name, model_types=None, output_dir=None, output_image_name=None): # Changed output_dir default
     logging.info(f"Generating F1 vs. Latency plot for dataset: {dataset_name}")
     if model_types:
         logging.info(f"Filtering for model types: {model_types}")
@@ -236,7 +244,7 @@ def plot_f1_vs_latency(db_file, dataset_name, model_types=None, output_dir=".", 
 
     if plot_df.empty or 'final_val_f1' not in plot_df.columns or 'inference_latency_ms_batch' not in plot_df.columns:
         logging.warning("Not enough data (F1 or latency missing) to generate F1 vs. Latency plot.")
-        return
+        return None # Return None if no data
         
     plot_df['final_val_f1'] = pd.to_numeric(plot_df['final_val_f1'], errors='coerce')
     plot_df['inference_latency_ms_batch'] = pd.to_numeric(plot_df['inference_latency_ms_batch'], errors='coerce')
@@ -244,26 +252,33 @@ def plot_f1_vs_latency(db_file, dataset_name, model_types=None, output_dir=".", 
 
     if plot_df.empty:
         logging.warning("Data is empty after dropping NaNs for F1 vs. Latency plot.")
-        return
+        return None # Return None if no data
 
-    plt.figure(figsize=(12, 7)) # Adjusted size
+    fig = Figure(figsize=(10, 6)) # Use Matplotlib's Figure directly
+    ax = fig.add_subplot(111)
+
     sns.scatterplot(data=plot_df, x='inference_latency_ms_batch', y='final_val_f1', hue='model_type', 
-                    size='inference_latency_ms_batch', sizes=(50, 600), alpha=0.7, legend="auto")
-    plt.title(f'F1 Score vs. Inference Latency on {dataset_name}')
-    plt.xlabel('Inference Latency (ms/batch) (Log Scale)')
-    plt.ylabel('Final Validation F1 Score')
-    plt.xscale('log') 
-    plt.legend(title='Model Type', bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0.)
-    plt.grid(True, which="both", ls="-", alpha=0.5)
-    
-    if not output_image_name:
+                    size='inference_latency_ms_batch', sizes=(50, 600), alpha=0.7, legend="auto", ax=ax)
+    ax.set_title(f'F1 Score vs. Inference Latency on {dataset_name}')
+    ax.set_xlabel('Inference Latency (ms/batch) (Log Scale)')
+    ax.set_ylabel('Final Validation F1 Score')
+    ax.set_xscale('log')
+    ax.legend(title='Model Type', bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0.)
+    ax.grid(True, which="both", ls="-", alpha=0.5)
+
+    # Default image name if saving
+    if output_dir and not output_image_name:
         output_image_name = f"{dataset_name}_f1_vs_latency.png"
-    image_path = os.path.join(output_dir, output_image_name)
+
+    if output_dir and output_image_name:
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        image_path = os.path.join(output_dir, output_image_name)
+        fig.tight_layout(rect=[0, 0, 0.85, 1]) # Apply tight_layout before saving for stand-alone image
+        fig.savefig(image_path)
+        logging.info(f"F1 vs. Latency plot saved to {image_path}")
     
-    plt.tight_layout(rect=[0, 0, 0.85, 1]) # Adjust layout
-    plt.savefig(image_path)
-    logging.info(f"F1 vs. Latency plot saved to {image_path}")
-    plt.close()
+    return fig # Always return the figure
 
 
 if __name__ == '__main__':
