@@ -15,11 +15,11 @@ def get_optimizer(params, optimizer_name: str, lr: float, weight_decay: float = 
         raise ValueError(f"Unsupported optimizer: {optimizer_name}")
 
 def get_scheduler(optimizer, scheduler_name: str, num_warmup_steps: int, num_training_steps: int):
-    if scheduler_name.lower() == "cosine_warmup":
+    if scheduler_name is None or scheduler_name.lower() == "none":
+        return None
+    elif scheduler_name.lower() == "cosine_warmup":
         from transformers import get_cosine_schedule_with_warmup
         return get_cosine_schedule_with_warmup(optimizer, num_warmup_steps=num_warmup_steps, num_training_steps=num_training_steps)
-    elif scheduler_name.lower() == "none" or scheduler_name is None:
-        return None
     else:
         raise ValueError(f"Unsupported scheduler: {scheduler_name}")
 
